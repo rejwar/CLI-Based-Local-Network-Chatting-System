@@ -1,4 +1,4 @@
-s/*
+/*
  * client.c — Cross-platform CLI group chat client
  * Compiles on macOS/Linux (POSIX) and Windows (Winsock).
  *
