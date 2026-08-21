@@ -1,18 +1,6 @@
 /*
- * client.c — Cross-platform CLI group chat client
- * Compiles on macOS/Linux (POSIX) and Windows (Winsock).
- *
- * Why a thread? On Windows, select() does NOT work on stdin (keyboard).
- * So instead of select(), we run one thread that blocks on recv() (network)
- * and the main thread blocks on fgets() (keyboard). Clean on both OSes.
- *
- * Build:
- *   macOS/Linux : gcc client.c -o client -lpthread
- *   Windows     : gcc client.c -o client -lws2_32
- *
- * Run:
- *   ./client 127.0.0.1        (same machine)
- *   ./client 192.168.0.105    (other machine's LAN IP)
+ * enhanced_client.c — Professional CLI chat client
+ * Build: gcc enhanced_client.c -o client -lpthread
  */
 
 #include <stdio.h>
@@ -35,24 +23,30 @@
 #endif
 
 #define PORT 8080
-#define BUF  1024
+#define BUF 2048
 
 sock_t sock;
 volatile int running = 1;
 
-/* Reader: continuously receive from server and print. Runs in its own thread. */
+/* Color codes */
+#define GREEN "\x1b[32m"
+#define BLUE "\x1b[34m"
+#define YELLOW "\x1b[33m"
+#define RED "\x1b[31m"
+#define RESET "\x1b[0m"
+#define BOLD "\x1b[1m"
+
 #ifdef _WIN32
 DWORD WINAPI reader(LPVOID arg) {
 #else
 void *reader(void *arg) {
 #endif
-    (void)arg;
     char buffer[BUF];
     while (running) {
         memset(buffer, 0, BUF);
         int n = recv(sock, buffer, BUF - 1, 0);
         if (n <= 0) {
-            printf("\nDisconnected from server.\n");
+            printf("\n%s[!] Disconnected%s\n", RED, RESET);
             running = 0;
             break;
         }
@@ -69,36 +63,39 @@ void *reader(void *arg) {
 
 int main(int argc, char *argv[]) {
     if (argc != 2) {
-        printf("Usage: %s <server_ip>\n", argv[0]);
+        printf("%sUsage: %s <server_ip>%s\n", BOLD, argv[0], RESET);
+        printf("Example: %s 127.0.0.1\n", argv[0]);
         return 1;
     }
 
 #ifdef _WIN32
     WSADATA wsa;
-    if (WSAStartup(MAKEWORD(2, 2), &wsa) != 0) {
-        printf("WSAStartup failed.\n");
-        return 1;
-    }
+    WSAStartup(MAKEWORD(2, 2), &wsa);
 #endif
 
     sock = socket(AF_INET, SOCK_STREAM, 0);
-    if (sock == INVALID_SOCKET) { printf("socket() failed\n"); return 1; }
+    if (sock == INVALID_SOCKET) {
+        printf("%s[ERROR] Socket failed%s\n", RED, RESET);
+        return 1;
+    }
 
     struct sockaddr_in addr;
     memset(&addr, 0, sizeof(addr));
     addr.sin_family = AF_INET;
     addr.sin_port = htons(PORT);
+
     if (inet_pton(AF_INET, argv[1], &addr.sin_addr) <= 0) {
-        printf("Invalid address: %s\n", argv[1]);
+        printf("%s[ERROR] Invalid address%s\n", RED, RESET);
         return 1;
     }
 
+    printf("%s[*] Connecting to %s:%d...%s\n", YELLOW, argv[1], PORT, RESET);
     if (connect(sock, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
-        printf("connect: Connection refused (is the server running? right IP?)\n");
+        printf("%s[ERROR] Connection refused%s\n", RED, RESET);
         return 1;
     }
+    printf("%s[✓] Connected!%s\n\n", GREEN, RESET);
 
-    /* Start the network reader thread */
 #ifdef _WIN32
     HANDLE th = CreateThread(NULL, 0, reader, NULL, 0, NULL);
 #else
@@ -106,16 +103,19 @@ int main(int argc, char *argv[]) {
     pthread_create(&th, NULL, reader, NULL);
 #endif
 
-    /* Main thread: read keyboard, send to server */
     char line[BUF];
     while (running) {
+        printf("%s> %s", BLUE, RESET);
         if (fgets(line, BUF, stdin) == NULL) break;
         if (!running) break;
+
         if (send(sock, line, (int)strlen(line), 0) < 0) {
-            printf("Send failed.\n");
+            printf("%s[ERROR] Send failed%s\n", RED, RESET);
             break;
         }
+
         if (strncmp(line, "/quit", 5) == 0) {
+            printf("%s[*] Goodbye!%s\n", YELLOW, RESET);
             running = 0;
             break;
         }
@@ -123,13 +123,13 @@ int main(int argc, char *argv[]) {
 
     running = 0;
     CLOSESOCK(sock);
+
 #ifdef _WIN32
     WaitForSingleObject(th, 1000);
     WSACleanup();
 #else
     pthread_join(th, NULL);
 #endif
+
     return 0;
 }
-
-
